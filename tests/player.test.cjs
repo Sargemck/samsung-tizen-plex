@@ -36,6 +36,19 @@ test('pause and stop report actual progress, and clean up the player',()=>{
   const f=fixture();f.open();f.av.ready();f.av.listener.oncurrentplaytime(25000);f.p.toggle();f.p.stop();
   assert.equal(f.reports.at(-2)[1],'paused');assert.equal(f.reports.at(-1)[1],'stopped');assert.equal(f.reports.at(-1)[2],25000);assert.equal(f.timers.size,0);
 });
+
+test('resume can refresh a long-paused transport without playing the stale buffer',()=>{
+  const f=fixture();let now=0;f.p.clock.now=()=>now;
+  const resumes=[];f.p.events.resume=(time,elapsed)=>{resumes.push({time,elapsed});if(elapsed<60000)return false;f.p.stop({notify:false,report:false});return true;};
+  f.open();f.av.ready();f.av.listener.oncurrentplaytime(123000);f.p.toggle();
+  now=30000;f.p.toggle();assert.equal(f.calls.filter(call=>call==='play').length,2);
+  f.p.toggle();now=930000;const staleListener=f.av.listener;f.p.toggle();
+  assert.deepEqual(resumes,[{time:123000,elapsed:30000},{time:123000,elapsed:900000}]);
+  assert.equal(f.calls.filter(call=>call==='play').length,2);assert.equal(f.p.active,false);assert.equal(f.timers.size,0);
+  assert.equal(f.reports.at(-1)[1],'paused','Refresh must not send a misleading stopped or zero-position timeline');
+  f.open(123000);staleListener.onerror('stale connection');f.av.ready();f.av.seekOK();
+  assert.equal(f.errors.length,0);assert.equal(f.reports.at(-1)[2],123000);
+});
 test('completion sends the final position to Plex',()=>{
   const f=fixture();f.open();f.av.ready();f.av.listener.onstreamcompleted();assert.equal(f.reports.at(-1)[2],600000);assert.equal(f.p.active,false);
 });

@@ -1,8 +1,13 @@
 (function (root) {
   'use strict';
   function clean(text) {
-    return String(text || '').replace(/\{[^}]*\}/g,'').replace(/<[^>]*>/g,'').replace(/\\[Nn]/g,'\n')
-      .replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&amp;/g,'&').replace(/&quot;/g,'"').replace(/&#39;/g,"'").replace(/&nbsp;/g,' ').trim();
+    return String(text || '').replace(/\r\n?/g,'\n').replace(/\{[^}]*\}/g,'').replace(/<br\s*\/?>|<\/(p|div)\s*>/gi,'\n').replace(/<[^>]*>/g,'')
+      .replace(/\\[Nn]/g,'\n').replace(/\\h/g,' ')
+      .replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&#(x[0-9a-f]+|\d+);/gi,function(match,code){
+        var point=/^x/i.test(code)?parseInt(code.slice(1),16):Number(code);
+        return point>0&&point<=0x10FFFF&&(point<0xD800||point>0xDFFF)?String.fromCodePoint(point):match;
+      }).replace(/&amp;/g,'&').replace(/&quot;/g,'"').replace(/&nbsp;/g,' ')
+      .replace(/[ \t]*\n[ \t]*/g,'\n').replace(/\n{2,}/g,'\n').trim();
   }
   function timestamp(value) {
     var pieces = String(value).replace(',','.').split(':');

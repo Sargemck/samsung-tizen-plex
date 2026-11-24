@@ -66,6 +66,7 @@
     this.buffering = false;
     this.duration = Number(item.duration || 0);
     this.state = 'buffering';
+    this.pausedAt = null;
     this.emit('state', 'buffering');
     try {
       this.av.open(url);
@@ -160,8 +161,13 @@
   Player.prototype.toggle = function () {
     if (!this.active || !this.started || this.seeking) return;
     try {
-      if (this.state === 'paused') { this.av.play(); this.state = 'playing'; this.resumeSubtitleClock(); }
-      else { this.av.pause(); this.state = 'paused'; this.pauseSubtitleClock(); }
+      if (this.state === 'paused') {
+        var pausedFor = this.pausedAt === null ? 0 : Math.max(0, this.subtitleNow() - this.pausedAt);
+        // The owner may reopen an expired transport before AVPlay consumes its old buffer.
+        if (this.events.resume && this.events.resume(this.time, pausedFor) === true) return;
+        this.av.play(); this.state = 'playing'; this.pausedAt = null; this.resumeSubtitleClock();
+      }
+      else { this.av.pause(); this.state = 'paused'; this.pausedAt = this.subtitleNow(); this.pauseSubtitleClock(); }
       this.watchBuffering();
       this.emit('state', this.state);
       this.report();

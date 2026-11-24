@@ -10,7 +10,7 @@
   var controls = document.getElementById('player-controls');
   var playbackMenu = document.getElementById('playback-menu');
   var menuOptions = document.getElementById('playback-menu-options'), menuReturnFocus;
-  var log = [], cache = [], stack = [], route = null, revision = 0, sections = [], accountEpoch = 0;
+  var log = [], rawSubtitles = [], cache = [], stack = [], route = null, revision = 0, sections = [], accountEpoch = 0;
   var pinTimer, controlsTimer, toastTimer, playerReturn, lastBack = 0;
   var viewRequest, subtitleTimer, subtitleRequest, subtitleEpoch=0, subtitleCues=[], externalSubtitle=null, subtitleAnchor=0;
   var playbackAttempt=null, playbackEpoch=0, playbackRequest, applyingPreferences=false, scrub=null, previewTimer;
@@ -1123,7 +1123,7 @@
       applyTrackPreferences();updateSubtitleClock();
     },
     buffer: function (loading, percent) { document.getElementById('player-message').textContent = loading ? 'Loading video' + (percent === undefined ? '…' : ' · ' + percent + '%') : ''; },
-    subtitle: function (text) { if(!externalSubtitle)setSubtitleText(S.clean(text)); },
+    subtitle: function (text) { if(text){rawSubtitles.push(JSON.stringify(String(text).slice(0,200)));if(rawSubtitles.length>5)rawSubtitles.shift();}if(!externalSubtitle)setSubtitleText(S.clean(text)); },
     progress: function (time, total) {
       subtitleAnchor=performance.now();renderExternalSubtitle();
       document.getElementById('playback-time').textContent = C.duration(time) + ' / ' + C.duration(total);
@@ -1131,10 +1131,22 @@
       if(!controls.hidden)updatePlaybackContext(false);
     },
     report: function (item, state, time, total) {
+      if(state!=='stopped')keepTranscodeAlive();
       var reportedAt=Date.now(),scope=preferenceScope();
       api('/:/timeline?' + C.query({ ratingKey: item.ratingKey, key: '/library/metadata/' + item.ratingKey, state: state, time: Math.floor(time), duration: Math.floor(total) }), { noBody: true }).then(function(){if(scope===preferenceScope())clearRecoveryPosition(item,reportedAt);}).catch(function () { /* Recorded in diagnostics; playback continues. */ });
     },
     notice: toast,
+    resume: function(time,pausedFor){
+      if(pausedFor<60000||!playbackAttempt||playbackAttempt.cancelled)return false;
+      var attempt=playbackAttempt;
+      if(attempt.switching){toast('Wait for the track change to finish.');return true;}
+      // A long pause can outlive a Plex session or an idle direct-file connection.
+      // Reopen at the exact paused position, retaining the mode and chosen streams.
+      attempt.offset=time;saveRecoveryPosition(attempt.item,time);
+      if(externalSubtitle)attempt.pendingSubtitle={stream:externalSubtitle,remember:false};
+      player.stop({notify:false,report:false});attempt.modes=[attempt.mode];attempt.index=-1;
+      note('Refreshing playback after a long pause');tryPlayback();return true;
+    },
     stopped: function (result) {
       finishPlayback(result&&result.completed);
     },
@@ -1152,9 +1164,23 @@
     if(externalSubtitle&&player.state==='playing')subtitleTimer=setInterval(renderExternalSubtitle,100);
     renderExternalSubtitle();
   }
+  function keepTranscodeAlive(){
+    var attempt=playbackAttempt,session=attempt&&attempt.session;
+    if(!session||attempt.cancelled||session.ping)return;
+    // Timeline reports track watch progress; Plex has a separate transcode keepalive.
+    var request=C.request(session.server+'/video/:/transcode/universal/ping?'+C.query({session:session.id}),{headers:session.headers,noBody:true,timeout:4000});
+    session.ping=request;
+    request.then(function(){session.ping=null;session.pingFailed=false;}).catch(function(error){
+      session.ping=null;
+      if(error.cancelled||attempt!==playbackAttempt||session!==attempt.session)return;
+      if(!session.pingFailed)note('Transcoder keepalive could not be confirmed.');
+      session.pingFailed=true;
+    });
+  }
   function cleanupTranscode(){
     if(!playbackAttempt||!playbackAttempt.session)return;
     var session=playbackAttempt.session;playbackAttempt.session=null;
+    if(session.ping&&session.ping.abort)session.ping.abort();
     C.request(session.server+'/video/:/transcode/universal/stop?'+C.query({session:session.id}),{headers:session.headers,noBody:true,timeout:4000}).catch(function(){note('Transcoder session cleanup could not be confirmed.');});
   }
   function finishPlayback(completed){
@@ -1562,7 +1588,7 @@
     main.appendChild(el('p', 'A photo of this screen is enough for debugging. Tokens and media URLs are excluded.', 'muted'));
     var version = 'Unavailable (desktop browser)';
     try { version = webapis.avplay.getVersion(); } catch (_) { /* Browser preview. */ }
-    var pre = el('pre', 'TizenOS Plex '+APP_VERSION+' | Baseline: Tizen 5.0\nAVPlay: ' + version + '\n' + navigator.userAgent + '\n\nTimings (this session):\n'+measurements.map(function(m){return m.name+': '+m.ms+' ms';}).join('\n')+'\n\n' + (log.join('\n') || 'No events yet.'));
+    var pre = el('pre', 'TizenOS Plex '+APP_VERSION+' | Baseline: Tizen 5.0\nAVPlay: ' + version + '\n' + navigator.userAgent + '\n\nTimings (this session):\n'+measurements.map(function(m){return m.name+': '+m.ms+' ms';}).join('\n')+'\n\nRaw TV subtitles (last 5):\n'+(rawSubtitles.join('\n')||'None yet.')+'\n\n' + (log.join('\n') || 'No events yet.'));
     pre.tabIndex = 0; main.appendChild(pre);
     main.appendChild(btn('Back', back, 'primary'));
     focusFirst();

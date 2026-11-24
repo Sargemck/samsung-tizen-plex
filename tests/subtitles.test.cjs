@@ -13,6 +13,13 @@ test('subtitle markup stays inert and overlap works when seeking backward',()=>{
   assert.equal(S.at(cues,5000),'長い字幕');assert.equal(S.at(cues,2500),'長い字幕\nalert(1)');assert.equal(S.at(cues,500),'');
   assert.equal(S.clean('{\\an8}Line\\Nnext'),'Line\nnext');
 });
+test('line breaks from TV and Plex subtitle text never glue words together',()=>{
+  for(const raw of ['putting<br>everything','putting<BR/>everything','putting <br /> everything','putting\r\neverything','putting\reverything','<p>putting</p><p>everything</p>','<div>putting</div>\n<div>everything</div>'])
+    assert.equal(S.clean(raw),'putting\neverything',JSON.stringify(raw));
+  assert.equal(S.clean('one\\htwo'),'one two');
+  assert.equal(S.clean('x&#160;y &#x41; &#39; &amp;#160;'),'x y A \' &#160;');
+  assert.equal(S.clean('bad &#xD800; &#99999999;'),'bad &#xD800; &#99999999;');
+});
 test('malformed cues and excessive files fail without unbounded rendering',()=>{
   assert.deepEqual(S.parse('not a subtitle\n\n1\n00:00:04,000 --> 00:00:02,000\nbad'),[]);
   assert.throws(()=>S.parse('x'.repeat(8*1024*1024+1)),/too large/);
